@@ -227,6 +227,7 @@ local Settings = {
 	Tracers = false,
 	Boxes = false,
 	BoxFill = false,
+	Skeleton = false,
 	WallCheck = true,
 	Watermark = true,
 	ShowFOV = true,
@@ -263,7 +264,7 @@ local LockedSettings = { FlyVortex = true }
 local DisplayNames = {
 	Enabled = "Aimbot", ShowFOV = "FOV Circle", IgnoreFOV = "Ignore FOV", TeamCheck = "Team Check", Triggerbot = "Triggerbot",
 	ESP = "ESP", Chams = "Chams", ShowNames = "Usernames", Tracers = "Tracers",
-	Boxes = "Boxes", BoxFill = "Box Fill", Fly = "Fly", FlyVortex = "Vortex",
+	Boxes = "Boxes", BoxFill = "Box Fill", Skeleton = "Skeleton", Fly = "Fly", FlyVortex = "Vortex",
 	Noclip = "Noclip", Speed = "Speed", InfiniteJump = "Infinite Jump",
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
@@ -279,7 +280,7 @@ defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
 defBind("aim", "Aim (hold)", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
 	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
-	"BoxFill", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
+	"BoxFill", "Skeleton", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
 }) do
 	local default
 	if k == "Triggerbot" then default = Enum.KeyCode.P end
@@ -362,6 +363,7 @@ local ESPColors = {
 	Name = Color3.fromRGB(255, 255, 255),
 	Box = Color3.fromRGB(255, 255, 255),
 	BoxFill = Color3.fromRGB(255, 70, 70),
+	Skeleton = Color3.fromRGB(255, 255, 255),
 }
 
 local FOVColor = Color3.fromRGB(255, 255, 255)
@@ -383,6 +385,27 @@ local function arrToPos(a)
 	return UDim2.new(math.clamp(a[1], 0, 1), math.clamp(a[2], -4000, 4000), math.clamp(a[3], 0, 1), math.clamp(a[4], -4000, 4000))
 end
 
+-- shared hooks for config profiles (filled in by the save block + Configs page)
+local ConfigAPI = {
+	available = false,
+	colorRefreshers = {},
+	colorGetters = {
+		["FOV Color"] = function() return FOVColor end,
+		["Cham Fill"] = function() return ESPColors.Fill end,
+		["Cham Outline"] = function() return ESPColors.Outline end,
+		["Box"] = function() return ESPColors.Box end,
+		["Box Fill"] = function() return ESPColors.BoxFill end,
+		["Skeleton"] = function() return ESPColors.Skeleton end,
+		["Tracers"] = function() return ESPColors.Tracer end,
+		["Usernames"] = function() return ESPColors.Name end,
+		["Checkbox"] = function() return Theme.Switch end,
+		["Accent"] = function() return Theme.Accent end,
+		["Text"] = function() return Theme.Text end,
+		["Background"] = function() return Theme.Background end,
+		["Outline"] = function() return Theme.Outline end,
+	},
+}
+
 do
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -393,7 +416,7 @@ local SAVE_VERSION = 2
 
 local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
-	"Boxes", "BoxFill", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
+	"Boxes", "BoxFill", "Skeleton", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
 	"RageBehind", "RageAbove", "RageBelow",
 }
@@ -404,7 +427,7 @@ local SAVE_NUMBERS = {
 	RageDistance = { 2, 20 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
-local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill" }
+local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton" }
 
 local function colorToArr(c)
 	return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
@@ -645,6 +668,88 @@ else
 		saveNowFn = function()
 			if toast then toast("Saving is off - see the status line") end
 		end
+	end
+end
+
+-- ===== CONFIG PROFILES =====
+local CONFIG_DIR = "OULConfigs"
+local AUTOLOAD_FILE = CONFIG_DIR .. "/_autoload.txt"
+
+ConfigAPI.available = hasFiles
+	and type(listfiles) == "function" and type(delfile) == "function"
+	and type(isfolder) == "function" and type(makefolder) == "function"
+	and type(isfile) == "function"
+
+local function cfgPath(name)
+	return CONFIG_DIR .. "/" .. name .. ".json"
+end
+
+function ConfigAPI.clean(name)
+	name = tostring(name or "")
+	name = name:gsub("[^%w%-_ ]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+	return name:sub(1, 24)
+end
+
+function ConfigAPI.list()
+	local names = {}
+	local ok, files = pcall(listfiles, CONFIG_DIR)
+	if ok and type(files) == "table" then
+		for _, f in ipairs(files) do
+			local n = string.match(f, "([^/\\]+)%.json$")
+			if n then names[#names + 1] = n end
+		end
+	end
+	table.sort(names, function(a, b) return a:lower() < b:lower() end)
+	return names
+end
+
+function ConfigAPI.save(name)
+	name = ConfigAPI.clean(name)
+	if name == "" then return false, "bad name" end
+	return pcall(function()
+		if not isfolder(CONFIG_DIR) then makefolder(CONFIG_DIR) end
+		writefile(cfgPath(name), HttpService:JSONEncode(takeSnapshot()))
+	end)
+end
+
+function ConfigAPI.load(name)
+	return pcall(function()
+		applySaved(HttpService:JSONDecode(readfile(cfgPath(name))))
+	end)
+end
+
+function ConfigAPI.getAutoload()
+	local ok, v = pcall(function()
+		if isfile(AUTOLOAD_FILE) then return readfile(AUTOLOAD_FILE) end
+	end)
+	if ok and type(v) == "string" then
+		v = ConfigAPI.clean(v)
+		if v ~= "" then return v end
+	end
+	return nil
+end
+
+function ConfigAPI.setAutoload(name)
+	return pcall(function()
+		if not isfolder(CONFIG_DIR) then makefolder(CONFIG_DIR) end
+		writefile(AUTOLOAD_FILE, name or "")
+	end)
+end
+
+function ConfigAPI.delete(name)
+	return pcall(function()
+		if isfile(cfgPath(name)) then delfile(cfgPath(name)) end
+		if ConfigAPI.getAutoload() == name then writefile(AUTOLOAD_FILE, "") end
+	end)
+end
+
+-- apply the autoload config on startup (runs before the menu is built)
+if ConfigAPI.available then
+	local auto = ConfigAPI.getAutoload()
+	local exists = auto and select(2, pcall(isfile, cfgPath(auto)))
+	if auto and exists then
+		local ok, err = ConfigAPI.load(auto)
+		if not ok then warn("[OUL config] autoload failed: " .. tostring(err)) end
 	end
 end
 end
@@ -1046,7 +1151,7 @@ local SUBTABS = {
 		{ id = "ragebot", label = "Ragebot" },
 	},
 	visuals = { { id = "esp", label = "ESP" }, { id = "colours", label = "Colours" } },
-	settings = { { id = "general", label = "General" }, { id = "keybinds", label = "Keybinds" } },
+	settings = { { id = "general", label = "General" }, { id = "keybinds", label = "Keybinds" }, { id = "configs", label = "Configs" } },
 	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex", disabled = true }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" }, { id = "mousetp", label = "Mouse TP" } },
 }
 local SUB_H = 26
@@ -1694,6 +1799,7 @@ local function addSlider(parent, text, min, max, key, onChanged)
 	end))
 
 	setValue(Settings[key])
+	refreshers[key] = function() setValue(Settings[key]) end
 	return bar
 end
 
@@ -1764,6 +1870,7 @@ local function addSegment(parent, text, key, optA, optB)
 	onTheme(function()
 		refresh(true)
 	end)
+	refreshers[key] = refresh
 	refresh(false)
 	return row
 end
@@ -2018,6 +2125,21 @@ local function addColor(parent, text, colors, onPick, default, hueS, hueV)
 		if color == default then
 			selectSwatch(i, false)
 		end
+	end
+
+	-- lets a loaded config refresh this picker's preview + selected swatch
+	local getCurrent = ConfigAPI.colorGetters[text]
+	if getCurrent then
+		table.insert(ConfigAPI.colorRefreshers, function()
+			local c = getCurrent()
+			preview.BackgroundColor3 = c
+			marker.Visible = false
+			local found
+			for i, color in ipairs(colors) do
+				if color == c then found = i end
+			end
+			selectSwatch(found, false)
+		end)
 	end
 	return holder
 end
@@ -2328,8 +2450,8 @@ do
 		return keyName(getBind("Ragebot").input) .. "  -  rage on / off"
 	end)
 	addNote(info, "sticks you to the closest")
-	addNote(info, "player: behind, above or")
-	addNote(info, "below them")
+	addNote(info, "player until they die:")
+	addNote(info, "behind, above or below")
 	addNote(info, "uses Team Check")
 end
 
@@ -2348,6 +2470,7 @@ do
 	addCheckbox(g, "Tracers", "Tracers")
 	addCheckbox(g, "Boxes", "Boxes")
 	addCheckbox(g, "Box Fill", "BoxFill")
+	addCheckbox(g, "Skeleton", "Skeleton")
 	addCheckbox(g, "Zombie/NPC ESP", "ESPNPCs")
 
 	local info = newGroup(espPage, 2, "Info")
@@ -2355,6 +2478,7 @@ do
 	addNote(info, "everything needs ESP on")
 	addNote(info, "boxes: outline + optional")
 	addNote(info, "see-through fill")
+	addNote(info, "skeleton: bone lines")
 	addNote(info, "colours are in Colours")
 end
 
@@ -2371,6 +2495,9 @@ do
 	local c2 = newGroup(colPage, 2, "Text & Lines")
 	addColor(c2, "Tracers", paletteWith(ESPColors.Tracer), setTracerColor, ESPColors.Tracer)
 	addColor(c2, "Usernames", paletteWith(ESPColors.Name), setNameColor, ESPColors.Name)
+	addColor(c2, "Skeleton", paletteWith(ESPColors.Skeleton), function(color)
+		ESPColors.Skeleton = color
+	end, ESPColors.Skeleton)
 end
 
 do
@@ -2597,7 +2724,7 @@ do
 	end
 
 	local v = newGroup(keyPage, 2, "Visuals")
-	for _, id in ipairs({ "ESP", "Chams", "ShowNames", "Tracers", "Boxes", "BoxFill" }) do
+	for _, id in ipairs({ "ESP", "Chams", "ShowNames", "Tracers", "Boxes", "BoxFill", "Skeleton" }) do
 		addKeybindRow(v, id)
 	end
 
@@ -2616,6 +2743,210 @@ do
 		updateKeyHints()
 		toast("Keybinds reset")
 	end)
+end
+
+-- ===== CONFIG PROFILES PAGE =====
+do
+	local cfgPage = newPage("settings_configs", true)
+	local g = newGroup(cfgPage, 1, "Configs")
+
+	if not ConfigAPI.available then
+		addNote(g, "needs executor file support")
+		addNote(g, "(listfiles, delfile,")
+		addNote(g, "isfolder, makefolder)")
+	else
+		local BLUE, BLUE_H = Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170)
+		local RED, RED_H = Color3.fromRGB(170, 55, 65), Color3.fromRGB(205, 75, 85)
+
+		-- after a config is loaded, push the new values into every widget
+		local function reloadUI()
+			for _, fn in pairs(refreshers) do pcall(fn, true) end
+			setChamColor(ESPColors.Fill)
+			setChamOutlineColor(ESPColors.Outline)
+			setNameColor(ESPColors.Name)
+			circleStroke.Color = FOVColor
+			applyTheme()
+			for _, fn in ipairs(ConfigAPI.colorRefreshers) do pcall(fn) end
+			hud.Visible = Settings.Watermark
+			keyList.Visible = Settings.KeybindList
+			if Positions.hud then hud.Position = Positions.hud end
+			if Positions.keylist then keyList.Position = Positions.keylist end
+			refreshBindUI()
+			updateKeyHints()
+			setESPEnabled()
+		end
+
+		-- list of saved configs
+		local list = Instance.new("ScrollingFrame")
+		list.Size = UDim2.new(1, 0, 0, 120)
+		list.BorderSizePixel = 0
+		list.ScrollBarThickness = 3
+		list.CanvasSize = UDim2.new()
+		list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		list.LayoutOrder = nextOrder(g)
+		list.Parent = g
+		bind(list, "BackgroundColor3", function() return Theme.Field end)
+		corner(list, 3)
+		outline(list, 0.4)
+		local ll = Instance.new("UIListLayout")
+		ll.Padding = UDim.new(0, 2)
+		ll.SortOrder = Enum.SortOrder.LayoutOrder
+		ll.Parent = list
+		local lp = Instance.new("UIPadding")
+		lp.PaddingTop = UDim.new(0, 3)
+		lp.PaddingLeft = UDim.new(0, 3)
+		lp.PaddingRight = UDim.new(0, 3)
+		lp.Parent = list
+
+		local autoNote = addNote(g, "autoload: none")
+
+		local selected, autoBtn, delBtn, pendingDelete = nil, nil, nil, false
+
+		local function rebuild()
+			for _, c in ipairs(list:GetChildren()) do
+				if c:IsA("TextButton") then c:Destroy() end
+			end
+			local names = ConfigAPI.list()
+			local auto = ConfigAPI.getAutoload()
+
+			local found = false
+			for _, n in ipairs(names) do
+				if n == selected then found = true end
+			end
+			if not found then selected = nil end
+
+			for i, name in ipairs(names) do
+				local on = (name == selected)
+				local b = Instance.new("TextButton")
+				b.Size = UDim2.new(1, -6, 0, 20)
+				b.BorderSizePixel = 0
+				b.AutoButtonColor = false
+				b.Font = FONT
+				b.TextSize = 12
+				b.TextXAlignment = Enum.TextXAlignment.Left
+				b.LayoutOrder = i
+				b.Text = "  " .. name .. (name == auto and "  [auto]" or "")
+				b.BackgroundTransparency = on and 0 or 1
+				b.BackgroundColor3 = Theme.Accent
+				b.TextColor3 = on and Color3.fromRGB(255, 255, 255) or Theme.Text
+				b.Parent = list
+				corner(b, 3)
+				b.MouseButton1Click:Connect(function()
+					selected = name
+					pendingDelete = false
+					if delBtn then delBtn.Text = "Delete" end
+					rebuild()
+				end)
+			end
+
+			autoNote.Text = "autoload: " .. (auto or "none")
+			if autoBtn then
+				autoBtn.Text = (auto and auto == selected) and "Remove autoload" or "Set as autoload"
+			end
+		end
+		onTheme(rebuild)
+
+		-- manage column
+		local m = newGroup(cfgPage, 2, "Manage")
+
+		local box = Instance.new("TextBox")
+		box.Size = UDim2.new(1, 0, 0, 22)
+		box.BorderSizePixel = 0
+		box.ClearTextOnFocus = false
+		box.PlaceholderText = "new config name..."
+		box.Text = ""
+		box.Font = FONT
+		box.TextSize = 12
+		box.TextXAlignment = Enum.TextXAlignment.Left
+		box.LayoutOrder = nextOrder(m)
+		box.Parent = m
+		bind(box, "BackgroundColor3", function() return Theme.Field end)
+		bind(box, "TextColor3", function() return Theme.Text end)
+		bind(box, "PlaceholderColor3", function() return Theme.Dim end)
+		corner(box, 3)
+		outline(box, 0.4)
+		local bp = Instance.new("UIPadding")
+		bp.PaddingLeft = UDim.new(0, 6)
+		bp.Parent = box
+
+		addButton(m, "Create new", BLUE, BLUE_H, function()
+			local name = ConfigAPI.clean(box.Text)
+			if name == "" then toast("Type a config name first") return end
+			for _, n in ipairs(ConfigAPI.list()) do
+				if string.lower(n) == string.lower(name) then
+					toast("That name already exists")
+					return
+				end
+			end
+			local ok, err = ConfigAPI.save(name)
+			if ok then
+				selected = name
+				box.Text = ""
+				toast("Created: " .. name)
+			else
+				warn("[OUL config] " .. tostring(err))
+				toast("Create failed - see Output")
+			end
+			rebuild()
+		end)
+
+		addButton(m, "Save (overwrite)", BLUE, BLUE_H, function()
+			if not selected then toast("Select a config first") return end
+			local ok, err = ConfigAPI.save(selected)
+			if not ok then warn("[OUL config] " .. tostring(err)) end
+			toast(ok and ("Saved: " .. selected) or "Save failed - see Output")
+		end)
+
+		addButton(m, "Load", BLUE, BLUE_H, function()
+			if not selected then toast("Select a config first") return end
+			local ok, err = ConfigAPI.load(selected)
+			if ok then
+				reloadUI()
+				toast("Loaded: " .. selected)
+			else
+				warn("[OUL config] " .. tostring(err))
+				toast("Load failed - see Output")
+			end
+		end)
+
+		autoBtn = addButton(m, "Set as autoload", BLUE, BLUE_H, function()
+			if not selected then toast("Select a config first") return end
+			if ConfigAPI.getAutoload() == selected then
+				ConfigAPI.setAutoload("")
+				toast("Autoload removed")
+			else
+				ConfigAPI.setAutoload(selected)
+				toast("Autoload: " .. selected)
+			end
+			rebuild()
+		end)
+
+		delBtn = addButton(m, "Delete", RED, RED_H, function()
+			if not selected then toast("Select a config first") return end
+			if not pendingDelete then
+				pendingDelete = true
+				delBtn.Text = "Click again to confirm"
+				task.delay(2.5, function()
+					if pendingDelete then
+						pendingDelete = false
+						delBtn.Text = "Delete"
+					end
+				end)
+				return
+			end
+			pendingDelete = false
+			delBtn.Text = "Delete"
+			local ok, err = ConfigAPI.delete(selected)
+			if not ok then warn("[OUL config] " .. tostring(err)) end
+			toast(ok and ("Deleted: " .. selected) or "Delete failed - see Output")
+			selected = nil
+			rebuild()
+		end)
+
+		addNote(m, "autoload applies on launch")
+
+		rebuild()
+	end
 end
 
 currentTab = "combat"
@@ -3093,6 +3424,122 @@ track(RunService.RenderStepped:Connect(function()
 	end
 end))
 
+-- ===== SKELETON ESP: bone lines between a character's joints =====
+do
+	local skeletons = {}
+	local SKELETON_MAX_DISTANCE = 1000
+
+	local function removeSkeleton(key)
+		local s = skeletons[key]
+		if s then
+			for _, l in ipairs(s.lines) do l:Destroy() end
+			skeletons[key] = nil
+		end
+	end
+	track(Players.PlayerRemoving:Connect(removeSkeleton))
+
+	-- every Motor6D that joins two body parts becomes one bone
+	local function buildJoints(char)
+		local out = {}
+		for _, part in ipairs(char:GetChildren()) do
+			if part:IsA("BasePart") then
+				for _, m in ipairs(part:GetChildren()) do
+					if m:IsA("Motor6D") then
+						local a, b = m.Part0, m.Part1
+						if a and b and a.Parent == char and b.Parent == char
+							and a.Name ~= "HumanoidRootPart" and b.Name ~= "HumanoidRootPart" then
+							out[#out + 1] = { a, b }
+						end
+					end
+				end
+			end
+		end
+		return out
+	end
+
+	track(RunService.RenderStepped:Connect(function()
+		if not (Settings.ESP and Settings.Skeleton) then
+			for key in pairs(skeletons) do removeSkeleton(key) end
+			return
+		end
+
+		local cam = workspace.CurrentCamera
+		local myChar = LocalPlayer.Character
+		local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+		local origin = myRoot and myRoot.Position or cam.CFrame.Position
+
+		local ents = espEntities()
+		local live = {}
+		for _, e in ipairs(ents) do
+			if e[2] then live[e[1]] = true end
+		end
+		for key in pairs(skeletons) do
+			if not live[key] then removeSkeleton(key) end
+		end
+
+		local now = os.clock()
+		for _, ent in ipairs(ents) do
+			local key, char = ent[1], ent[2]
+			if key ~= LocalPlayer and char then
+				local hum = char:FindFirstChildOfClass("Humanoid")
+				local root = char:FindFirstChild("HumanoidRootPart")
+				local s = skeletons[key]
+				if s and s.char ~= char then
+					removeSkeleton(key)
+					s = nil
+				end
+
+				if hum and root and hum.Health > 0
+					and (root.Position - origin).Magnitude <= SKELETON_MAX_DISTANCE then
+					if not s then
+						s = { char = char, joints = {}, lines = {}, built = 0 }
+						skeletons[key] = s
+					end
+					if now - s.built > 2 then
+						s.built = now
+						s.joints = buildJoints(char)
+					end
+
+					for i, j in ipairs(s.joints) do
+						local line = s.lines[i]
+						if not line then
+							line = Instance.new("Frame")
+							line.Name = "OULBone"
+							line.AnchorPoint = Vector2.new(0.5, 0.5)
+							line.BorderSizePixel = 0
+							line.Parent = gui
+							s.lines[i] = line
+						end
+
+						local a, b = j[1], j[2]
+						local shown = false
+						if a.Parent and b.Parent then
+							local pa = cam:WorldToViewportPoint(a.Position)
+							local pb = cam:WorldToViewportPoint(b.Position)
+							if pa.Z > 0 and pb.Z > 0 then
+								local p1, p2 = Vector2.new(pa.X, pa.Y), Vector2.new(pb.X, pb.Y)
+								local delta = p2 - p1
+								local mid = (p1 + p2) / 2
+								line.Size = UDim2.fromOffset(delta.Magnitude, 1.5)
+								line.Position = UDim2.fromOffset(mid.X, mid.Y)
+								line.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+								line.BackgroundColor3 = ESPColors.Skeleton
+								shown = true
+							end
+						end
+						line.Visible = shown
+					end
+					for i = #s.joints + 1, #s.lines do
+						s.lines[i].Visible = false
+					end
+				elseif s then
+					for _, l in ipairs(s.lines) do l.Visible = false end
+				end
+			end
+		end
+	end))
+end
+
 local flyActive = false
 
 local function flyDirection()
@@ -3219,27 +3666,34 @@ local function mouseTeleport()
 end
 
 -- ===== RAGEBOT: stay behind / above / below the closest player =====
--- every frame: find the closest living (damageable) player, then place your character
--- RageDistance studs behind, above or below them (whichever mode is selected),
--- facing the same way they face. Behind is the fallback if no mode is selected.
--- runs after the Fly loop so it takes priority over fly movement.
+-- finds the closest living (damageable) player, then LOCKS ON: it keeps that same
+-- player until they die, leave, or respawn, and only then picks a new closest one.
+-- places your character RageDistance studs behind, above or below them (whichever
+-- mode is selected), facing the same way they face. Behind is the fallback if no
+-- mode is selected. runs after the Fly loop so it takes priority over fly movement.
 local rageTarget = nil
 local rageShown = nil
 
 local function getRageTarget(myRoot)
-	local best, bestScore
+	-- keep the current target until they die, leave, or respawn
+	if rageTarget and rageTarget.plr and rageTarget.plr.Parent == Players then
+		local char = rageTarget.plr.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if root and root == rageTarget.root and isAlive(char) then
+			return rageTarget
+		end
+	end
+
+	-- otherwise pick the closest damageable player
+	local best, bestDist
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
 			local char = plr.Character
 			local root = char and char:FindFirstChild("HumanoidRootPart")
 			if root and isAlive(char) and canDamage(plr) then
-				local score = (root.Position - myRoot.Position).Magnitude
-				-- current target gets a bonus so it doesn't flicker between two close players
-				if rageTarget and rageTarget.root == root then
-					score -= 8
-				end
-				if not bestScore or score < bestScore then
-					best, bestScore = { root = root, name = plr.Name }, score
+				local d = (root.Position - myRoot.Position).Magnitude
+				if not bestDist or d < bestDist then
+					best, bestDist = { root = root, name = plr.Name, plr = plr }, d
 				end
 			end
 		end
@@ -3791,6 +4245,7 @@ local function cleanup()
 	end
 
 	Settings.Boxes = false
+	Settings.Skeleton = false
 
 	pcall(function() espFolder:Destroy() end)
 	pcall(function() gui:Destroy() end)
